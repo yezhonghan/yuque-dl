@@ -9,6 +9,9 @@ import { downloadArticleList } from './download/list'
 import type { ICliOptions, IProgressItem } from './types'
 import { downloadArticle } from './download/article'
 import { DEFAULT_DOMAIN } from './constant'
+import { exportBookToPdf, exportDocToPdf } from './pdf'
+
+export { exportBookToPdf, exportDocToPdf } from './pdf'
 
 export async function main(url: string, options: ICliOptions) {
   if (!isValidUrl(url)) {
@@ -54,6 +57,9 @@ export async function main(url: string, options: ICliOptions) {
   if (!options.incremental && progressBar.curr == total) {
     if (progressBar.bar) progressBar.bar.stop()
     logger.info(`√ 已完成: ${bookPath}`)
+    if (options.pdf) {
+      await exportBookToPdf(bookPath, { bookName, bookDesc })
+    }
     return
   }
 
@@ -94,6 +100,9 @@ export async function main(url: string, options: ICliOptions) {
 
   if (progressBar.curr === total) {
     logger.info(`√ 已完成: ${bookPath}`)
+    if (options.pdf) {
+      await exportBookToPdf(bookPath, { bookName, bookDesc })
+    }
   }
 }
 
@@ -295,6 +304,15 @@ export async function downloadDocsFromUrls(urls: string[], options: ICliOptions)
   successDocs.forEach(docsPath => {
     logger.info(`√ 已完成: ${docsPath}`)
   })
+  if (options.pdf) {
+    for (const docsPath of successDocs) {
+      try {
+        await exportDocToPdf(docsPath)
+      } catch (err: any) {
+        logger.error(`✕ 导出 PDF 失败: ${docsPath} - ${err.message}`)
+      }
+    }
+  }
   if (failCount > 0) {
     failedDocs.forEach(({ url, error }) => {
       logger.error(`✕ 下载失败: ${url}`)

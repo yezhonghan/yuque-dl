@@ -28,6 +28,8 @@ export interface ICliOptions {
   convertMarkdownVideoLinks: boolean
   /** 是否禁用页脚 */
   hideFooter: boolean
+  /** 下载完成后是否导出为pdf */
+  pdf?: boolean
 }
 
 export interface IServerCliOptions {

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { cac, Command } from 'cac'
 import semver from 'semver'
 
-import { downloadDocsFromUrls, downloadBooksFromUrls, downloadUserBooks, main } from './index'
+import { downloadDocsFromUrls, downloadBooksFromUrls, downloadUserBooks, main, exportBookToPdf } from './index'
 import { logger } from './utils'
 import { runServer } from './server'
 
@@ -52,6 +52,9 @@ function addCommonOption(cliCommand: Command): Command {
     default: false
   })
   .option('--hideFooter', '是否禁用页脚显示[更新时间、原文地址...]', {
+    default: false
+  })
+  .option('-pdf, --pdf', '下载完成后导出为单个PDF格式文件', {
     default: false
   })
 }
@@ -128,6 +131,19 @@ cli
     }
   })
 
+cli
+  .command('pdf <dir>', '将已下载的知识库目录转化为单个PDF文件')
+  .option('-o, --output <path>', '指定PDF输出文件路径')
+  .action(async (dir: string, options: { output?: string }) => {
+    try {
+      await exportBookToPdf(dir, { outputPath: options.output })
+      process.exit(0)
+    } catch (err: any) {
+      logger.error(err.message || 'unknown exception')
+      process.exit(1)
+    }
+  })
+
 cli.help((sections: CACHelpSection[])=>{
   const optionsItem = sections.find(item => item.title === 'Options')
   if (optionsItem) {
@@ -157,7 +173,9 @@ cli.help((sections: CACHelpSection[])=>{
 cli.version(version)
 
 try {
-  cli.parse()
+  // 规范化参数，确保 -pdf 不会被 cac 解析为 -p -d -f 短参数
+  const normalizedArgs = process.argv.map(arg => (arg === '-pdf' ? '--pdf' : arg))
+  cli.parse(normalizedArgs)
 } catch (err) {
   logger.error(err.message || 'unknown exception')
   process.exit(1)

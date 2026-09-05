@@ -66,6 +66,19 @@ describe('yuque-dl CLI', () => {
     const data = fs.readFileSync(indexMdPath).toString()
     expect(data).toMatchSnapshot()
   })
+
+  it('download with -pdf should export PDF', async () => {
+    const { stdout, exitCode } = await testTools.fork(cliPath, [
+      'https://www.yuque.com/yuque/eaghk3',
+      '-d', '.',
+      '-pdf',
+      '-i'
+    ])
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain('√ PDF 文件已保存至')
+    const pdfPath = path.join(testTools.cwd, '如何从其他工具迁入语雀/如何从其他工具迁入语雀.pdf')
+    expect(fs.existsSync(pdfPath)).toBe(true)
+  })
 })
 
 describe('yuque-dl doc', () => {
@@ -150,5 +163,36 @@ describe('yuque-dl batch', () => {
     expect(stdout).toMatch(/下载完成: 1\/2 个知识库成功/g)
     expect(stdout).toMatch(/失败 1 个/g)
     expect(stdout).toMatch('———— ✕ https://www.yuque.com/yuque/404: Request failed with status code 404')
+  })
+})
+
+describe('yuque-dl pdf command', () => {
+  beforeEach(() => {
+    testTools = new TestTools()
+  })
+
+  afterEach(() => {
+    testTools.cleanup()
+  })
+
+  it('should convert downloaded directory to PDF', async () => {
+    // 先通过已有的 mock 下载
+    await testTools.fork(cliPath, [
+      'https://www.yuque.com/yuque/eaghk3',
+      '-d', '.',
+      '-i',
+    ])
+    const bookDir = path.join(testTools.cwd, '如何从其他工具迁入语雀')
+    const customPdf = path.join(testTools.cwd, 'custom.pdf')
+
+    const { stdout, exitCode } = await testTools.fork(cliPath, [
+      'pdf',
+      bookDir,
+      '-o',
+      customPdf,
+    ])
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain('√ PDF 文件已保存至')
+    expect(fs.existsSync(customPdf)).toBe(true)
   })
 })
