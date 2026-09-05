@@ -93,6 +93,33 @@ function createMarkdownRenderer(): InstanceType<typeof MarkdownIt> {
   return md
 }
 
+export const STATIC_RESOURCE_NAMES = new Set([
+  'img',
+  'imgs',
+  'image',
+  'images',
+  'attachment',
+  'attachments',
+  'asset',
+  'assets',
+  'static',
+  'public',
+  '.vitepress',
+  'node_modules',
+  '.git',
+])
+
+/**
+ * 校验是否为静态资源目录（如 img、attachments 等）
+ */
+export function isStaticResourceName(name?: string): boolean {
+  if (!name) return false
+  const lower = name.toLowerCase().trim()
+  if (STATIC_RESOURCE_NAMES.has(lower)) return true
+  if (/^(img|images|attachments|assets)[_-]/i.test(lower)) return true
+  return false
+}
+
 /**
  * 从知识库目录加载文档列表及目录结构
  */
@@ -113,7 +140,7 @@ export function loadBookDocuments(bookPath: string): {
 
   const items: IPdfDocItem[] = []
   const fileToUuidMap = new Map<string, string>()
-  const tocNodes: IPdfTocNode[] = []
+  const rawTocNodes: IPdfTocNode[] = []
 
   // 1. 优先读取 progress.json
   if (fs.existsSync(progressJsonPath)) {
@@ -128,6 +155,17 @@ export function loadBookDocuments(bookPath: string): {
         const toc = p.toc || {}
         const uuid = toc.uuid || p.pathIdList?.at(-1) || String(toc.id || Math.random().toString(36).slice(2))
         const title = toc.title || p.pathTitleList?.at(-1) || '未命名文档'
+        const rawTitle = p.rawPathTitleList?.at(-1) || title
+
+        // 严格跳过静态资源目录（如 img、attachments 等）
+        if (
+          isStaticResourceName(title) ||
+          isStaticResourceName(rawTitle) ||
+          (p.path && (p.path === 'img' || p.path.startsWith('img/') || isStaticResourceName(p.path)))
+        ) {
+          continue
+        }
+
         const type: 'TITLE' | 'DOC' | 'LINK' = (toc.type || 'DOC').toUpperCase()
         const level = typeof toc.level === 'number' ? toc.level : (p.pathTitleList?.length ? p.pathTitleList.length - 1 : 0)
 
@@ -187,7 +225,7 @@ export function loadBookDocuments(bookPath: string): {
         if (parentUuid && nodeMap.has(parentUuid)) {
           nodeMap.get(parentUuid)!.children.push(tocNode)
         } else {
-          tocNodes.push(tocNode)
+          rawTocNodes.push(tocNode)
         }
       }
     } catch (e) {
@@ -217,6 +255,12 @@ export function loadBookDocuments(bookPath: string): {
           counter++
           const title = match[1].trim()
           const rawLink = match[2].trim()
+
+          // 忽略静态资源
+          if (isStaticResourceName(title) || isStaticResourceName(rawLink)) {
+            continue
+          }
+
           const cleanLink = decodeURIComponent(rawLink.split('#')[0])
           const absPath = path.resolve(resolvedBookPath, cleanLink)
           const uuid = `doc-${counter}`
@@ -233,7 +277,7 @@ export function loadBookDocuments(bookPath: string): {
             }
             items.push(docItem)
             fileToUuidMap.set(absPath, uuid)
-            tocNodes.push({
+            rawTocNodes.push({
               uuid,
               title,
               type: 'DOC',
@@ -252,13 +296,14 @@ export function loadBookDocuments(bookPath: string): {
     const scanDir = (dir: string, currentLevel = 0) => {
       const entries = fs.readdirSync(dir, { withFileTypes: true })
       for (const entry of entries) {
-        if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.name === 'img') continue
+        if (entry.name.startsWith('.') || isStaticResourceName(entry.name)) continue
         const fullPath = path.join(dir, entry.name)
         if (entry.isDirectory()) {
           scanDir(fullPath, currentLevel + 1)
         } else if (entry.isFile() && entry.name.endsWith('.md') && entry.name !== 'index.md') {
           const uuid = `scan-${items.length + 1}`
           const title = entry.name.replace(/\.md$/, '').replace(/_[a-zA-Z0-9-]+$/, '')
+          if (isStaticResourceName(title)) continue
           const docItem: IPdfDocItem = {
             uuid,
             title,
@@ -270,7 +315,7 @@ export function loadBookDocuments(bookPath: string): {
           }
           items.push(docItem)
           fileToUuidMap.set(fullPath, uuid)
-          tocNodes.push({
+          rawTocNodes.push({
             uuid,
             title,
             type: 'DOC',
@@ -284,13 +329,54 @@ export function loadBookDocuments(bookPath: string): {
     scanDir(resolvedBookPath)
   }
 
+  // 剪枝目录树：剔除静态资源目录以及无文档的空分类
+  const tocNodes = pruneTocNodes(rawTocNodes)
+
+  // 收集有效文档与分类 UUID
+  const validUuids = new Set<string>()
+  const collectUuids = (nodes: IPdfTocNode[]) => {
+    for (const n of nodes) {
+      validUuids.add(n.uuid)
+      if (n.children && n.children.length > 0) {
+        collectUuids(n.children)
+      }
+    }
+  }
+  collectUuids(tocNodes)
+
+  // 仅保留有效文档与分类
+  const validItems = items.filter((item) => validUuids.has(item.uuid) && !isStaticResourceName(item.title))
+
   return {
     bookTitle,
     bookDesc,
-    items,
+    items: validItems,
     tocNodes,
     fileToUuidMap,
   }
+}
+
+/**
+ * 递归剪枝目录树：剔除静态资源目录与没有真实文档的空目录
+ */
+function pruneTocNodes(nodes: IPdfTocNode[]): IPdfTocNode[] {
+  const result: IPdfTocNode[] = []
+  for (const node of nodes) {
+    if (isStaticResourceName(node.title)) {
+      continue
+    }
+    if (node.children && node.children.length > 0) {
+      node.children = pruneTocNodes(node.children)
+    }
+    // 如果是文档，且文件实际存在于磁盘，保留
+    if (node.type === 'DOC' && node.item?.absolutePath && fs.existsSync(node.item.absolutePath)) {
+      result.push(node)
+    } else if (node.children && node.children.length > 0) {
+      // 如果是分类目录且拥有有效子文档，保留
+      result.push(node)
+    }
+  }
+  return result
 }
 
 /**

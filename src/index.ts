@@ -1,4 +1,5 @@
-import { mkdir } from 'node:fs/promises'
+import { mkdir, rm } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import Summary from './parse/Summary'
 import { getDocInfoFromUrl, getKnowledgeBaseInfo, getUserBooks, verifyPublicPassword } from './api'
@@ -44,64 +45,88 @@ export async function main(url: string, options: ICliOptions) {
   })
   if (!bookId) throw new Error('No found book id')
   if (!tocList || tocList.length === 0) throw new Error('No found toc list')
-  const bookPath = path.resolve(options.distDir, bookName ? fixPath(bookName) : String(bookId))
+
+  const isPdfOnly = !!options.pdfOnly
+  const shouldExportPdf = !!(options.pdf || options.pdfOnly)
+  const safeBookDir = bookName ? fixPath(bookName) : String(bookId)
+  const finalPdfPath = path.resolve(options.distDir, `${safeBookDir}.pdf`)
+
+  const bookPath = isPdfOnly
+    ? path.resolve(os.tmpdir(), 'yuque-dl-temp', `${bookId}_${Date.now()}`)
+    : path.resolve(options.distDir, safeBookDir)
 
   await mkdir(bookPath, {recursive: true})
 
-  const total = tocList.length
-  const progressBar = new ProgressBar(bookPath, total, options.incremental)
-  await progressBar.init()
+  try {
+    const total = tocList.length
+    const progressBar = new ProgressBar(bookPath, total, options.incremental)
+    await progressBar.init()
 
-  // 为了检查是否有增量数据
-  // 即使已下载的与progress的数量一致也需继续进行
-  if (!options.incremental && progressBar.curr == total) {
-    if (progressBar.bar) progressBar.bar.stop()
-    logger.info(`√ 已完成: ${bookPath}`)
-    if (options.pdf) {
-      await exportBookToPdf(bookPath, { bookName, bookDesc })
+    // 为了检查是否有增量数据
+    // 即使已下载的与progress的数量一致也需继续进行
+    if (!options.incremental && progressBar.curr == total) {
+      if (progressBar.bar) progressBar.bar.stop()
+      logger.info(`√ 已完成: ${bookPath}`)
+      if (shouldExportPdf) {
+        await exportBookToPdf(bookPath, {
+          outputPath: isPdfOnly ? finalPdfPath : undefined,
+          bookName,
+          bookDesc,
+        })
+      }
+      return
     }
-    return
-  }
 
-  const uuidMap = new Map<string, IProgressItem>()
-  // 下载中断 重新获取下载进度数据 或者 增量下载 也需获取旧的下载进度
-  if (progressBar.isDownloadInterrupted || options.incremental) {
-    progressBar.progressInfo.forEach(item => {
-      uuidMap.set(
-        item.toc.uuid,
-        item
-      )
+    const uuidMap = new Map<string, IProgressItem>()
+    // 下载中断 重新获取下载进度数据 或者 增量下载 也需获取旧的下载进度
+    if (progressBar.isDownloadInterrupted || options.incremental) {
+      progressBar.progressInfo.forEach(item => {
+        uuidMap.set(
+          item.toc.uuid,
+          item
+        )
+      })
+    }
+    const articleUrlPrefix = url.replace(new RegExp(`(.*?/${bookSlug}).*`), '$1')
+    // 下载文章列表
+    await downloadArticleList({
+      articleUrlPrefix,
+      total,
+      uuidMap,
+      tocList,
+      bookPath,
+      bookId,
+      progressBar,
+      host,
+      options,
+      imageServiceDomains
     })
-  }
-  const articleUrlPrefix = url.replace(new RegExp(`(.*?/${bookSlug}).*`), '$1')
-  // 下载文章列表
-  await downloadArticleList({
-    articleUrlPrefix,
-    total,
-    uuidMap,
-    tocList,
-    bookPath,
-    bookId,
-    progressBar,
-    host,
-    options,
-    imageServiceDomains
-  })
 
-  // 生成目录
-  const summary = new Summary({
-    bookPath,
-    bookName,
-    bookDesc,
-    uuidMap
-  })
-  await summary.genFile()
-  logger.info(`√ 生成目录 ${path.resolve(bookPath, 'index.md')}`)
+    // 生成目录
+    const summary = new Summary({
+      bookPath,
+      bookName,
+      bookDesc,
+      uuidMap
+    })
+    await summary.genFile()
+    logger.info(`√ 生成目录 ${path.resolve(bookPath, 'index.md')}`)
 
-  if (progressBar.curr === total) {
-    logger.info(`√ 已完成: ${bookPath}`)
-    if (options.pdf) {
-      await exportBookToPdf(bookPath, { bookName, bookDesc })
+    if (progressBar.curr === total) {
+      logger.info(`√ 已完成: ${bookPath}`)
+      if (shouldExportPdf) {
+        await exportBookToPdf(bookPath, {
+          outputPath: isPdfOnly ? finalPdfPath : undefined,
+          bookName,
+          bookDesc,
+        })
+      }
+    }
+  } finally {
+    if (isPdfOnly) {
+      try {
+        await rm(bookPath, { recursive: true, force: true })
+      } catch {}
     }
   }
 }

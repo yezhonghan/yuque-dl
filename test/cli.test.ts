@@ -79,6 +79,22 @@ describe('yuque-dl CLI', () => {
     const pdfPath = path.join(testTools.cwd, '如何从其他工具迁入语雀/如何从其他工具迁入语雀.pdf')
     expect(fs.existsSync(pdfPath)).toBe(true)
   })
+
+  it('download with --pdfOnly should export PDF and NOT leave source directory', async () => {
+    const { stdout, exitCode } = await testTools.fork(cliPath, [
+      'https://www.yuque.com/yuque/eaghk3',
+      '-d', '.',
+      '--pdfOnly',
+      '-i'
+    ])
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain('√ PDF 文件已保存至')
+    const pdfPath = path.join(testTools.cwd, '如何从其他工具迁入语雀.pdf')
+    expect(fs.existsSync(pdfPath)).toBe(true)
+    // 验证源文件目录（包括 img 目录）没有留存在目标文件夹
+    const sourceDir = path.join(testTools.cwd, '如何从其他工具迁入语雀')
+    expect(fs.existsSync(sourceDir)).toBe(false)
+  })
 })
 
 describe('yuque-dl doc', () => {

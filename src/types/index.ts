@@ -30,6 +30,8 @@ export interface ICliOptions {
   hideFooter: boolean
   /** 下载完成后是否导出为pdf */
   pdf?: boolean
+  /** 仅导出为pdf，不保留本地源文件与静态资源目录 */
+  pdfOnly?: boolean
 }
 
 export interface IServerCliOptions {

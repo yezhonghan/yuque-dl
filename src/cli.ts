@@ -57,6 +57,9 @@ function addCommonOption(cliCommand: Command): Command {
   .option('-pdf, --pdf', '下载完成后导出为单个PDF格式文件', {
     default: false
   })
+  .option('--pdfOnly', '仅导出为单个PDF文件，不保留下载的Markdown与图片等源文件', {
+    default: false
+  })
 }
 
 const mainCommand = cli.command('<url>', '语雀知识库url')
@@ -174,7 +177,11 @@ cli.version(version)
 
 try {
   // 规范化参数，确保 -pdf 不会被 cac 解析为 -p -d -f 短参数
-  const normalizedArgs = process.argv.map(arg => (arg === '-pdf' ? '--pdf' : arg))
+  const normalizedArgs = process.argv.map(arg => {
+    if (arg === '-pdf') return '--pdf'
+    if (arg === '-pdfOnly') return '--pdfOnly'
+    return arg
+  })
   cli.parse(normalizedArgs)
 } catch (err) {
   logger.error(err.message || 'unknown exception')

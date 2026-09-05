@@ -95,6 +95,47 @@ describe('PDF Export Module', () => {
     expect(html).toContain('href="#doc-uuid-2"')
   })
 
+  it('should strictly exclude static resource directories like img from PDF TOC and content', () => {
+    const tempDir = path.join(__dirname, 'helpers/fixtures/pdf-test-resource-filter')
+    fs.mkdirSync(tempDir, { recursive: true })
+
+    const docPath = path.join(tempDir, 'normal-doc.md')
+    fs.writeFileSync(docPath, '# 正常文档\n\n正文内容\n', 'utf8')
+
+    const progressJsonPath = path.join(tempDir, 'progress.json')
+    fs.writeFileSync(
+      progressJsonPath,
+      JSON.stringify([
+        {
+          path: 'img',
+          pathTitleList: ['img'],
+          toc: { uuid: 'uuid-img', title: 'img', type: 'TITLE', level: 0 },
+        },
+        {
+          path: 'attachments',
+          pathTitleList: ['attachments'],
+          toc: { uuid: 'uuid-attachments', title: 'attachments', type: 'TITLE', level: 0 },
+        },
+        {
+          path: 'normal-doc.md',
+          pathTitleList: ['正常文档'],
+          toc: { uuid: 'uuid-doc', title: '正常文档', type: 'DOC', level: 0 },
+        },
+      ]),
+      'utf8'
+    )
+
+    const html = buildBookHtml(tempDir, { bookName: '资源过滤测试' })
+    // 目录中不包含 img 或 attachments
+    expect(html).not.toContain('href="#cat-uuid-img"')
+    expect(html).not.toContain('href="#cat-uuid-attachments"')
+    expect(html).not.toContain('id="cat-uuid-img"')
+    expect(html).not.toContain('id="cat-uuid-attachments"')
+    // 正常文档保留
+    expect(html).toContain('href="#doc-uuid-doc"')
+    expect(html).toContain('id="doc-uuid-doc"')
+  })
+
   it('should export a real PDF file from book directory', async () => {
     const tempDir = path.join(__dirname, 'helpers/fixtures/pdf-test-book')
     const outputPdf = path.join(tempDir, 'test_output.pdf')
